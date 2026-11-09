@@ -1,0 +1,4 @@
+<Project>
+  <!-- Same compiler setup as the e2e tests: LangVersion preview, compiled by the patched csc. -->
+  <Import Project="../../e2e/Directory.Build.props" />
+</Project>

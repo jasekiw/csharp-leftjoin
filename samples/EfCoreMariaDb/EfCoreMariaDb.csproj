@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Pomelo has no EF Core 10 release; EF Core 10 is the first to translate LeftJoin/RightJoin. -->
+    <PackageReference Include="MySql.EntityFrameworkCore" Version="10.0.12" />
+  </ItemGroup>
+
+</Project>

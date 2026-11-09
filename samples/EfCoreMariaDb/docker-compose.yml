@@ -1,0 +1,18 @@
+name: leftjoin-efcore
+
+services:
+  mariadb:
+    image: mariadb:11.8
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_DATABASE: university
+      MARIADB_USER: demo
+      MARIADB_PASSWORD: demo
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    ports:
+      - "${MARIADB_PORT:-3307}:3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
