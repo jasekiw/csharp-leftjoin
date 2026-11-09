@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""Run the fork's Roslyn language server behind the Cursor C# extension.
+
+The bundled extension (anysphere.csharp 1.0.x) launches the server, waits for
+`{"pipeName": "..."}` on stdout and then connects to that pipe. The fork's
+server instead expects `--pipe`/`--stdio` and rejects the Razor arguments the
+extension passes. This adapter listens on a Unix socket, announces it, and
+relays the socket to `Microsoft.CodeAnalysis.LanguageServer.dll --stdio`.
+
+Point the extension at it with `"dotnet.server.path": "<this file>"`.
+
+Environment:
+  LEFTJOIN_LSP_DLL             language server dll (default: the fork's Release build)
+  LEFTJOIN_DOTNET              dotnet host (default: roslyn/.dotnet/dotnet, then PATH)
+  LEFTJOIN_LSP_KEEP_EXTENSIONS=1  forward --extension (Razor) assemblies; they are
+                               built against the extension's Roslyn and usually fail to load
+"""
+
+import ctypes
+import json
+import os
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import uuid
+
+REPO = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+DEFAULT_DLL = os.path.join(
+    REPO, "roslyn", "artifacts", "bin", "Microsoft.CodeAnalysis.LanguageServer",
+    "Release", "net10.0", "Microsoft.CodeAnalysis.LanguageServer.dll")
+
+FLAG_OPTIONS = {"--debug"}
+VALUE_OPTIONS = {
+    "--logLevel", "--telemetryLevel", "--extensionLogDirectory", "--sessionId",
+    "--devKitDependencyPath", "--csharpDesignTimePath", "--brokeredServicePipeName",
+    "--autoLoadProjects", "--sourceGeneratorExecutionPreference", "--clientProcessId",
+}
+
+
+def log(message):
+    # stdout is shown in the extension's "C#" output channel as info.
+    print(f"[leftjoin-adapter] {message}", flush=True)
+
+
+def filter_args(argv):
+    keep_extensions = os.environ.get("LEFTJOIN_LSP_KEEP_EXTENSIONS") == "1"
+    result, dropped = [], []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        name, eq, inline_value = arg.partition("=")
+        if eq:
+            values, i = [inline_value], i + 1
+        elif i + 1 < len(argv) and not argv[i + 1].startswith("--"):
+            values, i = [argv[i + 1]], i + 2
+        else:
+            values, i = [], i + 1
+
+        if name in FLAG_OPTIONS:
+            result.append(name)
+            if values and not eq:
+                i -= 1
+        elif name in VALUE_OPTIONS or (name == "--extension" and keep_extensions):
+            result.extend([name, *values])
+        else:
+            dropped.append(" ".join([name, *values]))
+    return result, dropped
+
+
+def find_dotnet():
+    explicit = os.environ.get("LEFTJOIN_DOTNET")
+    if explicit:
+        return explicit
+    local = os.path.join(REPO, "roslyn", ".dotnet", "dotnet")
+    if os.access(local, os.X_OK):
+        return local
+    return shutil.which("dotnet") or "dotnet"
+
+
+def die_with_parent():
+    libc = ctypes.CDLL(None, use_errno=True)
+    PR_SET_PDEATHSIG = 1
+    libc.prctl(PR_SET_PDEATHSIG, signal.SIGTERM)
+
+
+def pump(read, write, on_close):
+    try:
+        while True:
+            data = read(65536)
+            if not data:
+                break
+            write(data)
+    except OSError:
+        pass
+    finally:
+        on_close()
+
+
+def main():
+    dll = os.environ.get("LEFTJOIN_LSP_DLL", DEFAULT_DLL)
+    if not os.path.isfile(dll):
+        sys.stderr.write(f"leftjoin language server not found at {dll}; run scripts/setup-cursor-lsp.sh\n")
+        return 1
+
+    server_args, dropped = filter_args(sys.argv[1:])
+    command = [find_dotnet(), dll, "--stdio", *server_args]
+    log(f"starting {' '.join(command)}")
+    if dropped:
+        log(f"dropped unsupported arguments: {'; '.join(dropped)}")
+
+    server = subprocess.Popen(
+        command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        preexec_fn=die_with_parent if sys.platform.startswith("linux") else None)
+
+    def shutdown(*_):
+        if server.poll() is None:
+            server.terminate()
+            try:
+                server.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                server.kill()
+
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, lambda *_: (shutdown(), sys.exit(0)))
+
+    pipe_path = os.path.join(tempfile.gettempdir(), f"leftjoin-lsp-{uuid.uuid4().hex[:12]}.sock")
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(pipe_path)
+    listener.listen(1)
+    print(json.dumps({"pipeName": pipe_path}), flush=True)
+
+    try:
+        client, _ = listener.accept()
+    finally:
+        listener.close()
+        os.unlink(pipe_path)
+    log("client connected")
+
+    def close_client():
+        try:
+            client.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+    def close_server_input():
+        try:
+            server.stdin.close()
+        except OSError:
+            pass
+
+    def write_server(data):
+        server.stdin.write(data)
+        server.stdin.flush()
+
+    threading.Thread(target=pump, args=(client.recv, write_server, close_server_input), daemon=True).start()
+    to_client = threading.Thread(target=pump, args=(server.stdout.read1, client.sendall, close_client), daemon=True)
+    to_client.start()
+
+    code = server.wait()
+    to_client.join(timeout=5)
+    client.close()
+    log(f"language server exited with {code}")
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

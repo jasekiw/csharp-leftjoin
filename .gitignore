@@ -4,3 +4,5 @@ local-feed/
 e2e/.nuget-packages/
 e2e/PatchedCompiler.props
 .nuget-packages/
+.vscode/settings.json
+__pycache__/
