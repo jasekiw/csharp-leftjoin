@@ -1,0 +1,4 @@
+[submodule "roslyn"]
+	path = roslyn
+	url = https://github.com/jasekiw/roslyn.git
+	branch = feature/leftjoin-rightjoin-query

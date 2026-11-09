@@ -1,0 +1,27 @@
+<Project>
+  <!--
+    The SDK's Csc task executes CscToolPath/CscToolExe directly and the toolset package has no
+    native launcher on Linux, so generate a wrapper that runs the package's csc.dll on dotnet.
+  -->
+  <Target Name="UsePatchedCsc" BeforeTargets="CoreCompile" Condition="'$(UsePatchedCompiler)' == 'true'">
+    <PropertyGroup>
+      <_PatchedCscDll>$(PkgMicrosoft_Net_Compilers_Toolset)/tasks/netcore/bincore/csc.dll</_PatchedCscDll>
+      <_PatchedCscDirectory>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)patched-csc</_PatchedCscDirectory>
+      <_DotnetHost>$(DOTNET_HOST_PATH)</_DotnetHost>
+      <_DotnetHost Condition="'$(_DotnetHost)' == ''">dotnet</_DotnetHost>
+    </PropertyGroup>
+
+    <Error Condition="!Exists('$(_PatchedCscDll)')" Text="Patched csc.dll not found at '$(_PatchedCscDll)'." />
+
+    <WriteLinesToFile File="$(_PatchedCscDirectory)/csc" Overwrite="true" WriteOnlyWhenDifferent="true"
+                      Lines="#!/bin/sh;exec &quot;$(_DotnetHost)&quot; &quot;$(_PatchedCscDll)&quot; &quot;%24@&quot;" />
+    <Exec Command="chmod +x &quot;$(_PatchedCscDirectory)/csc&quot;" />
+
+    <PropertyGroup>
+      <CscToolPath>$(_PatchedCscDirectory)</CscToolPath>
+      <CscToolExe>csc</CscToolExe>
+    </PropertyGroup>
+
+    <Message Importance="high" Text="$(MSBuildProjectName): compiling with patched csc $(PatchedCompilerVersion) ($(PatchedCompilerCommit)) from $(_PatchedCscDll)" />
+  </Target>
+</Project>

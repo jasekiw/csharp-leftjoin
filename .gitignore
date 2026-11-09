@@ -1,0 +1,5 @@
+bin/
+obj/
+local-feed/
+e2e/.nuget-packages/
+e2e/PatchedCompiler.props
