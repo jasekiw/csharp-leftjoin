@@ -13,7 +13,7 @@ select (s.Name, Department: d?.Name);   // Enumerable.LeftJoin(...)
 ## Setup on a new machine
 
 ```bash
-git clone --recurse-submodules <this repo> csharp
+git clone --recurse-submodules https://github.com/jasekiw/csharp-leftjoin.git csharp
 cd csharp
 ./scripts/e2e.sh
 ```
