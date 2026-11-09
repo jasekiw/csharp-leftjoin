@@ -10,6 +10,20 @@ leftjoin d in departments on s.DepartmentId equals d.Id
 select (s.Name, Department: d?.Name);   // Enumerable.LeftJoin(...)
 ```
 
+## Design decisions
+
+- **Single-word keywords.** `leftjoin`/`rightjoin` rather than the proposal's `left join`, because `left join` can
+  already be valid C# (`x is T left` followed by `join`). The keywords are contextual, so variables named
+  `leftjoin` keep working. Requires `LangVersion` preview.
+- **`into` is not allowed** on `leftjoin`/`rightjoin` (error CS9404); use `join ... into` for group joins.
+- **Nullability is scoped.** Only queries that contain `leftjoin`/`rightjoin` get real nullability: the
+  `leftjoin` inner variable and the `rightjoin` outer variables are maybe-null, including in later clauses.
+  All other queries are analyzed exactly as before.
+- **`rightjoin` after several range variables** (`from s ... from n ... rightjoin d ...`): .NET passes `null` for
+  the combined outer element when an inner element has no match. The compiler reads each outer range variable
+  through a null check, so they become `null`/`default` instead of throwing. The proposed spec translation has
+  this gap; worth raising upstream.
+
 ## Setup on a new machine
 
 ```bash
@@ -65,20 +79,6 @@ cd roslyn
 ./.dotnet/dotnet test src/Compilers/CSharp/Test/Syntax/Microsoft.CodeAnalysis.CSharp.Syntax.UnitTests.csproj \
   -c Release -f net10.0 --filter 'FullyQualifiedName~LeftRightJoinParsingTests'
 ```
-
-## Design decisions
-
-- **Single-word keywords.** `leftjoin`/`rightjoin` rather than the proposal's `left join`, because `left join` can
-  already be valid C# (`x is T left` followed by `join`). The keywords are contextual, so variables named
-  `leftjoin` keep working. Requires `LangVersion` preview.
-- **`into` is not allowed** on `leftjoin`/`rightjoin` (error CS9404); use `join ... into` for group joins.
-- **Nullability is scoped.** Only queries that contain `leftjoin`/`rightjoin` get real nullability: the
-  `leftjoin` inner variable and the `rightjoin` outer variables are maybe-null, including in later clauses.
-  All other queries are analyzed exactly as before.
-- **`rightjoin` after several range variables** (`from s ... from n ... rightjoin d ...`): .NET passes `null` for
-  the combined outer element when an inner element has no match. The compiler reads each outer range variable
-  through a null check, so they become `null`/`default` instead of throwing. The proposed spec translation has
-  this gap; worth raising upstream.
 
 ## Known limitations
 
